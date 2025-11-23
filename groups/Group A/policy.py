@@ -25,9 +25,53 @@ class MCTSAgent(Policy):
         self.rng = random.Random(seed)
         self.tabla_valores = {}
         self.iter_minima = 50
+        self.transiciones = {}
+        self.recompensas = {}
+        self.valores_v = {}
 
-    def mount(self):
+    def mount(self, *args, **kwargs):
         pass
+
+    def _id_estado(self, estado):
+        return estado.board.tobytes(), estado.player
+
+    def _actualizar_adp(self, estado_ant, accion, estado_sig):
+        id_ant = self._id_estado(estado_ant)
+        id_sig = self._id_estado(estado_sig)
+        if id_ant not in self.transiciones:
+            self.transiciones[id_ant] = {}
+        if accion not in self.transiciones[id_ant]:
+            self.transiciones[id_ant][accion] = {}
+        if id_sig not in self.transiciones[id_ant][accion]:
+            self.transiciones[id_ant][accion][id_sig] = 0
+        self.transiciones[id_ant][accion][id_sig] += 1
+        if id_ant not in self.recompensas:
+            self.recompensas[id_ant] = {}
+        self.recompensas[id_ant][accion] = estado_sig.get_winner()
+
+    def _v_adp(self, estado):
+        id_e = self._id_estado(estado)
+        if id_e in self.valores_v:
+            return self.valores_v[id_e]
+        if id_e not in self.transiciones:
+            return 0
+        mejor = -1e18
+        for accion in self.transiciones[id_e]:
+            n_total = sum(self.transiciones[id_e][accion].values())
+            suma = 0
+            for id_sig, n in self.transiciones[id_e][accion].items():
+                p = n / n_total
+                jugador_sig = id_sig[1]
+                b = np.frombuffer(id_sig[0], dtype=np.int64).reshape(6,7)
+                est_sig = ConnectState(b, jugador_sig)
+                r = 0
+                if id_e in self.recompensas and accion in self.recompensas[id_e]:
+                    r = self.recompensas[id_e][accion]
+                suma += p * (r + self._v_adp(est_sig))
+            if suma > mejor:
+                mejor = suma
+        self.valores_v[id_e] = mejor
+        return mejor
 
     def _ow(self, estado, oponente):
         tablero = estado.board
@@ -138,7 +182,7 @@ class MCTSAgent(Policy):
         for col in estado.get_free_cols():
             try:
                 if estado.transition(col).get_winner() == oponente:
-                    return max(base_iters, base_iters * 2)
+                    return max(base_iters, int(base_iters * 2))
             except:
                 pass
         peligro = False
@@ -199,7 +243,12 @@ class MCTSAgent(Policy):
                         mejor_accion = accion
                 if mejor_hijo is None:
                     break
-                estado_actual = estado_actual.transition(mejor_accion)
+                try:
+                    siguiente = estado_actual.transition(mejor_accion)
+                except:
+                    break
+                self._actualizar_adp(estado_actual, mejor_accion, siguiente)
+                estado_actual = siguiente
                 nodo = mejor_hijo
             if not estado_actual.is_final():
                 acciones_validas = estado_actual.get_free_cols()
@@ -214,15 +263,17 @@ class MCTSAgent(Policy):
                         nuevo_estado = estado_actual.transition(accion)
                     except:
                         nuevo_estado = estado_actual
+                    self._actualizar_adp(estado_actual, accion, nuevo_estado)
                     nuevo_nodo = MCTSNode(nodo, accion, nuevo_estado)
                     nodo.hijos[accion] = nuevo_nodo
                     if self._ow(nuevo_estado, oponente):
                         nuevo_nodo.bono -= 40
                     centro_col = estado.COLS // 2
-                    if estado_actual.player == -1 and accion == centro_col:
+                    if nuevo_estado.player == -1 and accion == centro_col:
                         nuevo_nodo.bono += 3
                     nuevo_nodo.bono += self._h(nuevo_estado) * 0.002
                     nuevo_nodo.bono += self._ro(nuevo_estado, jugador) * 0.05
+                    nuevo_nodo.bono += self._v_adp(nuevo_estado) * 0.01
                     if len(no_exploradas) == 1:
                         nodo.expandido = (len(acciones_validas) == 1)
                     nodo = nuevo_nodo
@@ -248,7 +299,8 @@ class MCTSAgent(Policy):
         pasos = 0
         while not sim.is_final() and pasos < self.limite_rollout:
             movs = sim.get_free_cols()
-            if not movs: break
+            if not movs:
+                break
             sim = sim.transition(self.rng.choice(movs))
             pasos += 1
         ganador = sim.get_winner()
