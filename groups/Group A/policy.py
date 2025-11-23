@@ -23,6 +23,8 @@ class MCTSAgent(Policy):
         self.c = c
         self.limite_rollout = rl
         self.rng = random.Random(seed)
+        self.tabla_valores = {}
+        self.iter_minima = 50
 
     def mount(self):
         pass
@@ -60,6 +62,9 @@ class MCTSAgent(Policy):
         return False
 
     def _h(self, estado):
+        llave = estado.board.tobytes()
+        if llave in self.tabla_valores:
+            return self.tabla_valores[llave]
         tablero = estado.board
         filas = estado.ROWS
         columnas = estado.COLS
@@ -92,6 +97,7 @@ class MCTSAgent(Policy):
                 diag2 = np.array([tablero[fila2+i, col2+3-i] for i in range(4)])
                 puntaje += sw(diag1)
                 puntaje += sw(diag2)
+        self.tabla_valores[llave] = puntaje
         return puntaje
 
     def _ro(self, estado, jugador):
@@ -101,7 +107,7 @@ class MCTSAgent(Policy):
             for i in range(4):
                 movs = sim.get_free_cols()
                 if not movs: break
-                accion = random.choice(movs)
+                accion = self.rng.choice(movs)
                 try:
                     sim = sim.transition(accion)
                 except:
@@ -128,7 +134,7 @@ class MCTSAgent(Policy):
 
     def _adjust_iterations(self, estado, jugador):
         oponente = -jugador
-        base_iters = self.iteraciones
+        base_iters = max(self.iteraciones, self.iter_minima)
         for col in estado.get_free_cols():
             try:
                 if estado.transition(col).get_winner() == oponente:
@@ -145,10 +151,10 @@ class MCTSAgent(Policy):
                 pass
         heuristica = self._h(estado)
         if peligro or abs(heuristica) < 30:
-            return int(base_iters * 1.5)
+            return int(base_iters * 1.8)
         if abs(heuristica) > 200:
-            return int(base_iters * 0.6)
-        return max(20, int(base_iters * 0.25))
+            return max(self.iter_minima, int(base_iters * 0.8))
+        return max(self.iter_minima, int(base_iters * 0.5))
 
     def act(self, s):
         tablero = np.array(s, copy=True)
@@ -178,7 +184,7 @@ class MCTSAgent(Policy):
         iteraciones = self._adjust_iterations(estado, jugador)
         for _ in range(iteraciones):
             nodo = raiz
-            estado_actual = ConnectState(estado.board, estado.player)
+            estado_actual = ConnectState(estado.board.copy(), estado.player)
             while True:
                 if estado_actual.is_final() or not nodo.expandido:
                     break
@@ -208,11 +214,12 @@ class MCTSAgent(Policy):
                         nuevo_estado = estado_actual.transition(accion)
                     except:
                         nuevo_estado = estado_actual
-                    nuevo_nodo = MCTSNode(nodo, accion)
+                    nuevo_nodo = MCTSNode(nodo, accion, nuevo_estado)
                     nodo.hijos[accion] = nuevo_nodo
-                    if self._ow(estado_actual, accion):
+                    if self._ow(nuevo_estado, oponente):
                         nuevo_nodo.bono -= 40
-                    if estado_actual.player == -1 and accion == 3:
+                    centro_col = estado.COLS // 2
+                    if estado_actual.player == -1 and accion == centro_col:
                         nuevo_nodo.bono += 3
                     nuevo_nodo.bono += self._h(nuevo_estado) * 0.002
                     nuevo_nodo.bono += self._ro(nuevo_estado, jugador) * 0.05
