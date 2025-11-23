@@ -4,10 +4,10 @@
 - Julián Mauricio Zafra Moreno
 
 ## Detalles Generales
-- Politica basada en Monte Carlo Tree Search en el archivo "policy.py" de la carpeta Group A
+- Agente basado en Monte Carlo Tree Search en el archivo "policy.py" de la carpeta Group A
 - Ejecución mediante el main.py para el enfrentamiento entre agentes
 
-## Requisitos del ambinte para el notebook
+## Requisitos del ambiente para el notebook
 
 - Numpy
 - Matplotlib
