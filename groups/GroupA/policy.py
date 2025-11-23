@@ -1,4 +1,4 @@
-import math, random, numpy as np
+import math, random, time, numpy as np
 from connect4.policy import Policy
 from connect4.connect_state import ConnectState
 
@@ -18,20 +18,20 @@ class MCTSNode:
         return float("inf") if self.visitas == 0 else (self.valor + self.bono) / self.visitas + c * math.sqrt(math.log(max(1, pv)) / self.visitas)
 
 class MCTSAgent(Policy):
-    def __init__(self, it=100, c=1.2, rl=20, seed=None):
-        self.iteraciones = it
+    def __init__(self, c=1.2, rl=20, seed=None):
         self.c = c
         self.limite_rollout = rl
         self.rng = random.Random(seed)
         self.tabla_valores = {}
-        self.iter_minima = 50
         self.transiciones = {}
         self.recompensas = {}
         self.valores_v = {}
+        self.tiempo_limite = 1
 
-    def mount(self, *args, **kwargs):
+    def mount(self, time_out=3) -> None:
+        self.tiempo_limite = 3
         pass
-
+    
     def _id_estado(self, estado):
         return estado.board.tobytes(), estado.player
 
@@ -176,31 +176,8 @@ class MCTSAgent(Policy):
                 pass
         return False
 
-    def _adjust_iterations(self, estado, jugador):
-        oponente = -jugador
-        base_iters = max(self.iteraciones, self.iter_minima)
-        for col in estado.get_free_cols():
-            try:
-                if estado.transition(col).get_winner() == oponente:
-                    return max(base_iters, int(base_iters * 2))
-            except:
-                pass
-        peligro = False
-        for col in estado.get_free_cols():
-            try:
-                if self._ow(estado.transition(col), oponente):
-                    peligro = True
-                    break
-            except:
-                pass
-        heuristica = self._h(estado)
-        if peligro or abs(heuristica) < 30:
-            return int(base_iters * 1.8)
-        if abs(heuristica) > 200:
-            return max(self.iter_minima, int(base_iters * 0.8))
-        return max(self.iter_minima, int(base_iters * 0.5))
-
     def act(self, s):
+        tiempo_inicio = time.time()
         tablero = np.array(s, copy=True)
         negativos = np.sum(tablero == -1)
         positivos = np.sum(tablero == 1)
@@ -225,8 +202,7 @@ class MCTSAgent(Policy):
         raiz = MCTSNode()
         for mov in movs:
             raiz.hijos[mov] = MCTSNode(raiz, mov)
-        iteraciones = self._adjust_iterations(estado, jugador)
-        for _ in range(iteraciones):
+        while time.time() - tiempo_inicio < (self.tiempo_limite - 0.05):
             nodo = raiz
             estado_actual = ConnectState(estado.board.copy(), estado.player)
             while True:
@@ -292,6 +268,9 @@ class MCTSAgent(Policy):
             if hijo.visitas > mas_visitas:
                 mas_visitas = hijo.visitas
                 mejor_mov = accion
+        if mejor_mov is None:
+             if movs: return self.rng.choice(movs)
+             else: return 0
         return int(mejor_mov)
 
     def _roll(self, estado, jugador_objetivo):
